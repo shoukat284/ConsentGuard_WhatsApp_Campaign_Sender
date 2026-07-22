@@ -1,3 +1,21 @@
+# ConsentGuard WhatsApp Campaign Sender v2.0.6
+
+## Fixed
+
+- Fixed WhatsApp Connect failure when Chromium reports: `The browser is already running ... Use a different userDataDir or stop the running browser first`.
+- Added a single in-flight WhatsApp startup guard so repeated clicks on **Connect WhatsApp** reuse the same startup instead of launching another browser against the same session folder.
+- Added automatic recovery for stale WhatsApp browser profile locks in the app-data session directory.
+- Added targeted stale-browser cleanup that only stops Chrome/Edge/Chromium processes whose command line contains this app's WhatsApp session path.
+- Added safe removal of orphan Chromium lock files such as `SingletonLock`, `SingletonSocket`, and `SingletonCookie` after a crash or forced close.
+- Ignored delayed events from old WhatsApp clients after reconnect/recovery so stale browser events cannot overwrite the current connection state.
+- Added timeout-protected browser cleanup during disconnect and logout.
+
+## Tests
+
+- Added WhatsApp connection tests for duplicate Connect clicks and locked-profile retry recovery.
+
+---
+
 # ConsentGuard WhatsApp Campaign Sender v2.0.5
 
 ## Fixed
