@@ -1,3 +1,20 @@
+# ConsentGuard WhatsApp Campaign Sender v2.0.7
+
+## Fixed
+
+- Fixed the Contacts tab bulk-action dropdown freezing or becoming difficult to select after deleting selected contacts.
+- Added a dedicated renderer-side stability guard for Contacts bulk actions.
+- Bulk actions now disable controls only while the operation is running and always re-enable the dropdown and Apply button in a `finally` cleanup path.
+- After opt-out, re-subscribe, or delete bulk actions, selected contact state, the visible checkbox state, and the dropdown value are reset safely.
+- Added an extra post-render reset after the contacts table refreshes to avoid Chromium keeping the native select control in a stale focused state.
+
+## Notes
+
+- This fix does not change contact deletion rules. Delete still removes contacts only from the local contact list and does not remove historical campaign recipient records.
+- Opt-out still adds contacts to the permanent suppression list.
+
+---
+
 # ConsentGuard WhatsApp Campaign Sender v2.0.6
 
 ## Fixed
@@ -35,7 +52,7 @@
 - Bulk opt-out all contacts matching the current search/filter.
 - Bulk re-subscribe selected contacts.
 - Bulk delete selected contacts from the local contact list.
-- Bulk delete all contacts matching the current search/filter.
+- Bulk delete all contacts matching current search/filter.
 
 ## Notes
 
