@@ -1,6 +1,6 @@
 {
   "name": "consentguard-whatsapp-campaign-sender",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "Consent-based WhatsApp desktop campaign sender with suppression, scheduling, delivery reporting and safety controls",
   "main": "main.js",
   "author": "",
