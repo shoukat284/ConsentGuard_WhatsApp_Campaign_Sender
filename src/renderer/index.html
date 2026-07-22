@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ConsentGuard WhatsApp Campaign Sender</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">WA</div><div><strong>ConsentGuard</strong><small>Campaign Sender</small></div></div>
+    <nav>
+      <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="nav-btn" data-tab="campaigns">Campaigns</button>
+      <button class="nav-btn" data-tab="contacts">Contacts</button>
+      <button class="nav-btn" data-tab="templates">Templates</button>
+      <button class="nav-btn" data-tab="logs">Logs</button>
+      <button class="nav-btn" data-tab="settings">Settings</button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="status-row"><span class="status-dot" id="side-status-dot"></span><span id="side-status-text">Disconnected</span></div>
+      <button class="btn danger full" id="emergency-pause">Emergency pause</button>
+      <button class="btn secondary full hidden" id="resume-sending">Resume sending</button>
+    </div>
+  </aside>
+
+  <main class="main-content">
+    <section class="tab active" id="dashboard-tab">
+      <div class="page-heading"><div><h1>Dashboard</h1><p>Consent-based campaign operations and delivery overview.</p></div><button class="btn secondary" id="refresh-dashboard">Refresh</button></div>
+
+      <div class="connection-card">
+        <div>
+          <div class="eyebrow">WhatsApp connection</div>
+          <h2 id="wa-connection-title">Disconnected</h2>
+          <p id="wa-connection-detail">Press Connect to display the linking QR code.</p>
+        </div>
+        <div class="button-row">
+          <button class="btn primary" id="connect-whatsapp">Connect</button>
+          <button class="btn secondary" id="disconnect-whatsapp">Disconnect</button>
+          <button class="btn ghost" id="logout-whatsapp">Log out session</button>
+        </div>
+      </div>
+
+      <div class="stats-grid">
+        <article class="stat-card"><span>Queued</span><strong id="stat-queued">0</strong></article>
+        <article class="stat-card"><span>Sending</span><strong id="stat-sending">0</strong></article>
+        <article class="stat-card success"><span>Sent</span><strong id="stat-sent">0</strong></article>
+        <article class="stat-card success"><span>Delivered</span><strong id="stat-delivered">0</strong></article>
+        <article class="stat-card success"><span>Read</span><strong id="stat-read">0</strong></article>
+        <article class="stat-card danger"><span>Failed</span><strong id="stat-failed">0</strong></article>
+        <article class="stat-card warning"><span>Skipped</span><strong id="stat-skipped">0</strong></article>
+        <article class="stat-card warning"><span>Opted out</span><strong id="stat-optedout">0</strong></article>
+      </div>
+      <div class="panel chart-panel"><canvas id="campaign-chart"></canvas></div>
+    </section>
+
+    <section class="tab" id="campaigns-tab">
+      <div class="page-heading"><div><h1>Campaigns</h1><p>Only explicitly opted-in, non-suppressed recipients are eligible.</p></div><button class="btn primary" id="new-campaign">New campaign</button></div>
+      <div id="campaign-list" class="card-list"></div>
+    </section>
+
+    <section class="tab" id="contacts-tab">
+      <div class="page-heading"><div><h1>Contacts</h1><p>CSV columns: phone, name, email, tags, opt_in, opt_in_date, consent_source.</p></div><button class="btn primary" id="open-import">Import CSV</button></div>
+      <div class="contacts-toolbar">
+        <div class="contact-search-group"><input id="contact-search" placeholder="Search contacts"><select id="contact-status-filter"><option value="">All statuses</option><option value="optedIn">Opted in</option><option value="optedOut">Opted out</option></select></div>
+        <div class="bulk-actions"><span id="selected-contact-count" class="muted">0 selected</span><select id="contact-bulk-action"><option value="">Bulk action…</option><option value="optout-selected">Opt out selected</option><option value="optout-all">Opt out all matching search</option><option value="reoptin-selected">Re-subscribe selected</option><option value="delete-selected">Delete selected from contact list</option><option value="delete-all">Delete all matching search</option></select><button class="btn secondary small" id="apply-contact-bulk">Apply</button></div>
+        <span id="contact-count" class="muted"></span>
+      </div>
+      <div class="panel table-wrap"><table><thead><tr><th><input type="checkbox" id="select-visible-contacts" title="Select visible contacts"></th><th>Phone</th><th>Name</th><th>Email</th><th>Tags</th><th>Consent</th><th>Status</th><th>Action</th></tr></thead><tbody id="contacts-body"></tbody></table></div>
+      <div class="pagination"><button class="btn secondary small" id="contacts-prev">Previous</button><span id="contacts-page-label">Page 1</span><button class="btn secondary small" id="contacts-next">Next</button></div>
+    </section>
+
+    <section class="tab" id="templates-tab">
+      <div class="page-heading"><div><h1>Templates</h1><p>Use variables such as {{name}}, {{phone}} and {{email}}.</p></div></div>
+      <div class="two-column">
+        <form class="panel form-panel" id="template-form">
+          <input type="hidden" id="template-id">
+          <label>Name<input id="template-name" maxlength="200" required></label>
+          <label>Message<textarea id="template-body" rows="8" maxlength="10000" required></textarea></label>
+          <div class="button-row"><button class="btn primary" type="submit">Save template</button><button class="btn ghost" type="button" id="clear-template">Clear</button></div>
+        </form>
+        <div id="template-list" class="card-list"></div>
+      </div>
+    </section>
+
+    <section class="tab" id="logs-tab">
+      <div class="page-heading"><div><h1>Activity logs</h1><p>Operational events, pauses, retries and errors.</p></div><button class="btn secondary" id="refresh-logs">Refresh</button></div>
+      <div class="filter-row"><select id="log-level"><option value="">All levels</option><option value="info">Info</option><option value="warn">Warning</option><option value="error">Error</option></select></div>
+      <div class="logs" id="logs-container"></div>
+    </section>
+
+    <section class="tab" id="settings-tab">
+      <div class="page-heading"><div><h1>Safety settings</h1><p>Limits are stored locally and survive application restarts.</p></div></div>
+      <form class="panel settings-grid" id="settings-form">
+        <label>Daily message limit<input type="number" id="daily-limit" min="1" required></label>
+        <label>Failure-rate pause (%)<input type="number" id="failure-rate" min="1" max="100" required></label>
+        <label>Minimum attempts before rate pause<input type="number" id="failure-sample" min="1" required></label>
+        <label>Minimum recipient delay (seconds)<input type="number" id="min-delay" min="0" required></label>
+        <label>Maximum recipient delay (seconds)<input type="number" id="max-delay" min="0" required></label>
+        <label>Retry count<input type="number" id="max-retries" min="0" max="10" required></label>
+        <label>Base retry delay (seconds)<input type="number" id="retry-delay" min="1" required></label>
+        <div class="settings-summary"><span>Sent today</span><strong id="daily-count">0</strong><span>Remaining today</span><strong id="daily-remaining">0</strong></div>
+        <button class="btn primary" type="submit">Save settings</button>
+      </form>
+    </section>
+  </main>
+</div>
+
+<div class="modal" id="qr-modal" aria-hidden="true">
+  <div class="modal-card compact">
+    <button class="modal-close" data-close="qr-modal">×</button>
+    <h2>Link WhatsApp</h2>
+    <p>On your phone: WhatsApp → Linked devices → Link a device.</p>
+    <div class="qr-frame"><div class="spinner" id="qr-spinner"></div><img id="qr-image" alt="WhatsApp linking QR code" class="hidden"></div>
+    <p class="muted" id="qr-message">Starting WhatsApp and waiting for a QR code…</p>
+  </div>
+</div>
+
+<div class="modal" id="campaign-modal" aria-hidden="true">
+  <div class="modal-card wide">
+    <button class="modal-close" data-close="campaign-modal">×</button>
+    <h2>Create campaign</h2>
+    <form id="campaign-form">
+      <div class="form-grid">
+        <label>Campaign name<input id="campaign-name" maxlength="200" required></label>
+        <label>Saved template<select id="campaign-template-select"><option value="">Write a message below</option></select></label>
+        <label class="span-2">Message<textarea id="campaign-message" rows="6" maxlength="10000" required></textarea></label>
+        <label class="span-2">Media URL (optional)<input id="media-url" type="url" placeholder="https://example.com/image.jpg"></label>
+        <label>Batch size<input id="batch-size" name="batchSize" type="number" value="10" min="1" max="100" autocomplete="off" required></label>
+        <label>Batch delay (minutes)<input id="batch-delay" name="batchDelay" type="number" value="5" min="0" max="1440" autocomplete="off" required></label>
+        <label class="check-row span-2"><input id="campaign-limit-enabled" name="campaignLimitEnabled" type="checkbox" autocomplete="off"> Use a separate cap for this campaign. Leave this off to use only the daily limit from Settings.</label>
+        <label id="campaign-limit-wrap" class="hidden">Separate campaign cap<input id="campaign-limit" name="campaignLimit" type="number" min="1" autocomplete="off" disabled></label>
+        <label>One-time cron schedule (optional)<input id="campaign-schedule" name="campaignSchedule" autocomplete="off" placeholder="0 9 * * 1"></label>
+        <label class="span-2">Time zone<input id="campaign-timezone" readonly></label>
+      </div>
+      <div class="recipient-section">
+        <div class="recipient-heading"><div><h3>Select recipients</h3><p>Suppressed and opted-out contacts are automatically excluded.</p></div></div>
+        <label>Target audience<select id="target-mode"><option value="all">All opted-in contacts</option><option value="tags">Contacts matching tags</option><option value="selected">Individually selected contacts</option></select></label>
+        <label id="target-tags-wrap" class="hidden">Required tags (comma separated)<input id="target-tags" placeholder="vip, customer"></label>
+        <div id="selected-target-wrap" class="hidden">
+          <div class="recipient-heading"><span class="muted" id="selected-recipient-count">0 selected</span><input id="recipient-search" placeholder="Search opted-in contacts"></div>
+          <label class="check-row"><input type="checkbox" id="select-all-recipients"> Select all visible contacts</label>
+          <div id="recipient-list" class="recipient-list"></div>
+        </div>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn ghost" data-close="campaign-modal">Cancel</button><button class="btn primary" type="submit">Create campaign</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="import-modal" aria-hidden="true">
+  <div class="modal-card">
+    <button class="modal-close" data-close="import-modal">×</button>
+    <h2>Import opted-in contacts</h2>
+    <form id="import-form">
+      <label>Default country calling code (only for local-format numbers)<input id="default-country-code" placeholder="92"></label>
+      <label>Consent source<input id="consent-source" placeholder="Website signup form, signed customer list…" required></label>
+      <label>Consent evidence or note<textarea id="consent-evidence" rows="3" placeholder="Optional reference, date range or form name"></textarea></label>
+      <label class="check-row consent-box"><input type="checkbox" id="consent-confirmed" required> I confirm every imported contact has expressly agreed to receive WhatsApp marketing messages.</label>
+      <div class="modal-actions"><button type="button" class="btn ghost" data-close="import-modal">Cancel</button><button class="btn primary" type="submit">Choose CSV and import</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="report-modal" aria-hidden="true">
+  <div class="modal-card wide">
+    <button class="modal-close" data-close="report-modal">×</button>
+    <div class="page-heading"><div><h2>Recipient report</h2><p id="report-summary"></p></div><button class="btn secondary" id="export-report">Export CSV</button></div>
+    <div class="table-wrap report-table"><table><thead><tr><th>Phone</th><th>Status</th><th>Attempts</th><th>Delivery</th><th>Error</th></tr></thead><tbody id="report-body"></tbody></table></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<script src="../../node_modules/chart.js/dist/chart.umd.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

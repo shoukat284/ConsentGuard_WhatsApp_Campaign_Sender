@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.wwebjs_auth/
+.wwebjs_cache/
+whatsapp-auth/
+*.db
+*.db~
+npm-debug.log*
+.DS_Store
