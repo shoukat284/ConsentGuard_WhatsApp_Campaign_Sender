@@ -1,4 +1,4 @@
-# ConsentGuard WhatsApp Campaign Sender v2.0.6
+# ConsentGuard WhatsApp Campaign Sender v2.0.7
 
 Consent-based Electron desktop application for sending controlled WhatsApp campaign messages to opted-in contacts.
 
@@ -22,8 +22,21 @@ npm run dist:win
 
 Send the two generated EXE files from `dist`:
 
-- `ConsentGuard WhatsApp Campaign Sender Setup 2.0.6.exe`
-- `ConsentGuard WhatsApp Campaign Sender 2.0.6.exe`
+- `ConsentGuard WhatsApp Campaign Sender Setup 2.0.7.exe`
+- `ConsentGuard WhatsApp Campaign Sender 2.0.7.exe`
+
+## Contacts bulk-action dropdown fix
+
+Version 2.0.7 fixes a Contacts tab issue where the **Bulk action** dropdown could become stuck or difficult to open after deleting selected contacts.
+
+The Contacts bulk-action flow now:
+
+- Uses a dedicated stability guard for the Contacts toolbar.
+- Prevents the old click handler from running twice.
+- Disables the dropdown and Apply button only while the action is processing.
+- Always re-enables the dropdown and Apply button after success, failure, or cancellation.
+- Clears selected contact state after successful opt-out, re-subscribe, or delete actions.
+- Resets the dropdown again after the contacts table refreshes, avoiding a stale Chromium native-select focus state.
 
 ## WhatsApp Connect lock recovery
 
