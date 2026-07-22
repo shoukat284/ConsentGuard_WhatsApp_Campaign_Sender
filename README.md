@@ -1,10 +1,10 @@
-# ConsentGuard WhatsApp Campaign Sender v2.0.5
+# ConsentGuard WhatsApp Campaign Sender v2.0.6
 
 Consent-based Electron desktop application for sending controlled WhatsApp campaign messages to opted-in contacts.
 
 ## Install on Windows
 
-Open PowerShell inside the extracted project folder:
+Open PowerShell inside the project folder:
 
 ```powershell
 $env:PUPPETEER_SKIP_DOWNLOAD = "true"
@@ -22,8 +22,20 @@ npm run dist:win
 
 Send the two generated EXE files from `dist`:
 
-- `ConsentGuard WhatsApp Campaign Sender Setup 2.0.5.exe`
-- `ConsentGuard WhatsApp Campaign Sender 2.0.5.exe`
+- `ConsentGuard WhatsApp Campaign Sender Setup 2.0.6.exe`
+- `ConsentGuard WhatsApp Campaign Sender 2.0.6.exe`
+
+## WhatsApp Connect lock recovery
+
+Version 2.0.6 fixes this error:
+
+```text
+The browser is already running for C:\Users\gh\AppData\Roaming\consentguard-whatsapp-campaign-sender\whatsapp-auth\session-marketing-desktop. Use a different userDataDir or stop the running browser first.
+```
+
+The app now prevents duplicate Connect clicks from starting a second Chromium instance on the same WhatsApp profile. If an old hidden Chrome/Edge process or stale Chromium lock file remains after a crash, the app automatically cleans only the browser process tied to this app's WhatsApp session path and then retries the connection once.
+
+If Windows still keeps the browser locked, close the app completely, open Task Manager, end any stuck Chrome/Edge process created by this app, and reopen the app. You should not need to delete the WhatsApp session or rescan unless the session itself is invalid.
 
 ## Fix for stuck campaign with cap 3/3
 
@@ -31,7 +43,7 @@ If an existing campaign shows `Separate campaign cap: 3` and the log says `CAMPA
 
 ## Contacts bulk actions
 
-The Contacts tab now includes:
+The Contacts tab includes:
 
 - Select visible contacts
 - Bulk action dropdown
