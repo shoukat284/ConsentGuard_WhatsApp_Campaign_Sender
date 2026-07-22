@@ -1,8 +1,12 @@
 const path = require('path');
 const fs = require('fs');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const Handlebars = require('handlebars');
 const { normalizePhone, normalizeWhatsAppId, sleep, withTimeout } = require('./utils');
+
+const execFileAsync = promisify(execFile);
 
 class MessageSender {
   constructor(logger, safetyGuard, dataDir) {
@@ -12,6 +16,7 @@ class MessageSender {
     this.client = null;
     this.status = 'disconnected';
     this.initializing = false;
+    this.connectPromise = null;
     this.callbacks = {
       qr: null,
       status: null,
@@ -26,6 +31,13 @@ class MessageSender {
     if (this.callbacks.status) this.callbacks.status({ status, details });
   }
 
+  authDataPath() {
+    return path.join(this.dataDir, 'whatsapp-auth');
+  }
+
+  sessionPath() {
+    return path.join(this.authDataPath(), 'session-marketing-desktop');
+  }
 
   resolveBrowserExecutable() {
     const candidates = [
@@ -48,7 +60,7 @@ class MessageSender {
     const client = new Client({
       authStrategy: new LocalAuth({
         clientId: 'marketing-desktop',
-        dataPath: path.join(this.dataDir, 'whatsapp-auth')
+        dataPath: this.authDataPath()
       }),
       authTimeoutMs: 120000,
       qrMaxRetries: 8,
@@ -64,35 +76,50 @@ class MessageSender {
       }
     });
 
+    const isCurrentClient = () => this.client === client;
+
     client.on('loading_screen', (percent, message) => {
+      if (!isCurrentClient()) return;
       this.setStatus('loading', `${percent}% ${message || ''}`.trim());
     });
     client.on('qr', (qr) => {
+      if (!isCurrentClient()) return;
       this.setStatus('qr_required');
       if (this.callbacks.qr) this.callbacks.qr(qr);
     });
-    client.on('authenticated', () => this.setStatus('authenticated'));
+    client.on('authenticated', () => {
+      if (!isCurrentClient()) return;
+      this.setStatus('authenticated');
+    });
     client.on('auth_failure', async (message) => {
+      if (!isCurrentClient()) return;
       this.initializing = false;
       this.setStatus('auth_failure', message);
       await this.logger.log('error', `WhatsApp authentication failed: ${message}`);
     });
     client.on('ready', async () => {
+      if (!isCurrentClient()) return;
       this.initializing = false;
       this.setStatus('connected');
       await this.logger.log('info', 'WhatsApp connected and ready');
     });
     client.on('disconnected', async (reason) => {
+      if (!isCurrentClient()) return;
       this.initializing = false;
-      if (this.client === client) this.client = null;
+      this.connectPromise = null;
+      this.client = null;
       this.setStatus('disconnected', String(reason || 'Disconnected'));
       await this.logger.log('warn', `WhatsApp disconnected: ${reason || 'unknown reason'}`);
       try { await client.destroy(); } catch (_) { /* already closed */ }
     });
-    client.on('message', (message) => this.handleIncomingMessage(message).catch((error) => {
-      this.logger.log('error', `Incoming reply processing failed: ${error.message}`);
-    }));
+    client.on('message', (message) => {
+      if (!isCurrentClient()) return;
+      this.handleIncomingMessage(message).catch((error) => {
+        this.logger.log('error', `Incoming reply processing failed: ${error.message}`);
+      });
+    });
     client.on('message_ack', (message, ack) => {
+      if (!isCurrentClient()) return;
       const messageId = message?.id?._serialized;
       if (messageId && this.callbacks.ack) this.callbacks.ack(messageId, ack);
     });
@@ -100,34 +127,156 @@ class MessageSender {
     return client;
   }
 
+  isBrowserProfileLockError(error) {
+    return /browser is already running|userDataDir|SingletonLock|ProcessSingleton|profile.*in use/i.test(error?.message || '');
+  }
+
+  cleanupProfileLocks() {
+    const sessionDir = this.sessionPath();
+    const lockNames = ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'lockfile', 'LOCK'];
+    let removed = 0;
+    for (const name of lockNames) {
+      const lockPath = path.join(sessionDir, name);
+      try {
+        if (fs.existsSync(lockPath)) {
+          fs.rmSync(lockPath, { recursive: true, force: true });
+          removed += 1;
+        }
+      } catch (_) {
+        // Active Chromium may still hold the lock. The next initialize attempt will report a clear error if so.
+      }
+    }
+    return removed;
+  }
+
+  async stopSessionBrowsers() {
+    const sessionDir = this.sessionPath();
+    if (!fs.existsSync(sessionDir)) return 0;
+
+    try {
+      if (process.platform === 'win32') {
+        const safeSession = sessionDir.replace(/'/g, "''");
+        const script = `
+$session = '${safeSession}'
+$processes = @(Get-CimInstance Win32_Process | Where-Object {
+  $_.CommandLine -and
+  $_.CommandLine.IndexOf($session, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+  $_.Name -match '^(chrome|msedge|chromium|brave|opera)\\.exe$'
+})
+foreach ($item in $processes) {
+  try {
+    Stop-Process -Id $item.ProcessId -Force -ErrorAction Stop
+    Write-Output $item.ProcessId
+  } catch { }
+}
+`;
+        const encoded = Buffer.from(script, 'utf16le').toString('base64');
+        const { stdout } = await execFileAsync(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+          { windowsHide: true, timeout: 10000 }
+        );
+        return stdout.split(/\r?\n/).filter((line) => /^\d+$/.test(line.trim())).length;
+      }
+
+      const { stdout } = await execFileAsync('ps', ['-eo', 'pid=,comm=,args='], { timeout: 10000 });
+      const matches = stdout.split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && line.includes(sessionDir) && /chrome|chromium|msedge|brave|opera/i.test(line));
+      let killed = 0;
+      for (const line of matches) {
+        const pid = Number(line.split(/\s+/)[0]);
+        if (pid && pid !== process.pid) {
+          try {
+            process.kill(pid, 'SIGKILL');
+            killed += 1;
+          } catch (_) {
+            // The process may already be gone.
+          }
+        }
+      }
+      return killed;
+    } catch (error) {
+      await this.logger.log('warn', `Could not automatically stop stale WhatsApp browser process: ${error.message}`);
+      return 0;
+    }
+  }
+
+  async recoverLockedBrowserProfile(lockedClient) {
+    this.setStatus('recovering', 'Closing stale WhatsApp browser session and retrying…');
+    try {
+      if (lockedClient) {
+        await withTimeout(lockedClient.destroy(), 10000, 'Browser cleanup timed out');
+      }
+    } catch (_) {
+      // Continue with targeted stale-process cleanup below.
+    }
+
+    if (this.client === lockedClient) this.client = null;
+    const killed = await this.stopSessionBrowsers();
+    await sleep(800);
+    const removedLocks = this.cleanupProfileLocks();
+    await sleep(500);
+    await this.logger.log(
+      'warn',
+      `Recovered locked WhatsApp browser profile; stopped ${killed} stale process(es), removed ${removedLocks} lock file(s)`
+    );
+  }
+
+  async initializeClientWithRecovery() {
+    let lastError;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      if (!this.client) this.client = this.buildClient();
+      const initializingClient = this.client;
+      try {
+        await initializingClient.initialize();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (!this.isBrowserProfileLockError(error) || attempt >= 2) throw error;
+        await this.logger.log('warn', `WhatsApp browser profile is locked: ${error.message}`);
+        await this.recoverLockedBrowserProfile(initializingClient);
+        this.initializing = true;
+        this.setStatus('initializing', 'Retrying WhatsApp startup after stale browser cleanup…');
+      }
+    }
+    throw lastError;
+  }
+
   async connect() {
     if (this.status === 'connected') return { success: true, status: this.status };
-    if (this.initializing) return { success: true, status: this.status };
+    if (this.connectPromise || this.initializing) return { success: true, status: this.status, message: 'WhatsApp connection is already starting.' };
 
     this.initializing = true;
     this.setStatus('initializing');
-    if (!this.client) this.client = this.buildClient();
 
-    const initializingClient = this.client;
-    initializingClient.initialize().catch(async (error) => {
+    const connectPromise = this.initializeClientWithRecovery();
+    this.connectPromise = connectPromise;
+
+    connectPromise.catch(async (error) => {
       this.initializing = false;
-      if (this.client === initializingClient) this.client = null;
-      try { await initializingClient.destroy(); } catch (_) { /* initialization did not complete */ }
+      const failedClient = this.client;
+      this.client = null;
+      try { await failedClient?.destroy(); } catch (_) { /* initialization did not complete */ }
       this.setStatus('error', error.message);
       await this.logger.log('error', `WhatsApp initialization failed: ${error.message}`);
+    }).finally(() => {
+      if (this.connectPromise === connectPromise) this.connectPromise = null;
     });
 
     return { success: true, status: this.status };
   }
 
   async disconnect() {
+    const activeClient = this.client;
     try {
-      if (this.client) await this.client.destroy();
+      this.initializing = false;
+      this.connectPromise = null;
+      this.client = null;
+      if (activeClient) await withTimeout(activeClient.destroy(), 15000, 'Disconnect timed out while closing WhatsApp browser');
     } catch (error) {
       await this.logger.log('warn', `WhatsApp disconnect warning: ${error.message}`);
     } finally {
-      this.client = null;
-      this.initializing = false;
       this.setStatus('disconnected');
     }
     return { success: true };
@@ -135,13 +284,16 @@ class MessageSender {
 
   async logout() {
     try {
-      if (this.client) {
-        try { await this.client.logout(); } catch (_) { /* session may already be invalid */ }
-        try { await this.client.destroy(); } catch (_) { /* ignored */ }
-      }
+      const activeClient = this.client;
       this.client = null;
       this.initializing = false;
-      fs.rmSync(path.join(this.dataDir, 'whatsapp-auth'), { recursive: true, force: true });
+      this.connectPromise = null;
+      if (activeClient) {
+        try { await activeClient.logout(); } catch (_) { /* session may already be invalid */ }
+        try { await withTimeout(activeClient.destroy(), 15000, 'Logout browser cleanup timed out'); } catch (_) { /* ignored */ }
+      }
+      await this.stopSessionBrowsers();
+      fs.rmSync(this.authDataPath(), { recursive: true, force: true });
       this.setStatus('disconnected');
       await this.logger.log('info', 'WhatsApp session logged out');
       return { success: true };
@@ -322,7 +474,13 @@ class MessageSender {
   onOptOut(callback) { this.callbacks.optOut = callback; }
   onReOptIn(callback) { this.callbacks.reOptIn = callback; }
   onAck(callback) { this.callbacks.ack = callback; }
-  getStatus() { return { status: this.status, connected: this.status === 'connected' && Boolean(this.client) }; }
+  getStatus() {
+    return {
+      status: this.status,
+      connected: this.status === 'connected' && Boolean(this.client),
+      initializing: Boolean(this.initializing || this.connectPromise)
+    };
+  }
   async destroy() { return this.disconnect(); }
 }
 
